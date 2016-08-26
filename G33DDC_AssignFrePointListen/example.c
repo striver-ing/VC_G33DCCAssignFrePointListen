@@ -5,6 +5,7 @@
 
 #define MSG_EXITTHREAD (WM_APP+1000)
 
+G33DDC_GET_DEVICE_LIST GetDeviceList;
 G33DDC_OPEN_DEVICE OpenDevice;
 G33DDC_CLOSE_DEVICE CloseDevice;
 G33DDC_SET_POWER SetPower;
@@ -88,6 +89,7 @@ BOOL Initialize(void)
     }
 
     //retrieve addresses of used API functions
+	GetDeviceList = (G33DDC_GET_DEVICE_LIST)GetProcAddress(hAPI, "GetDeviceList");
     OpenDevice=(G33DDC_OPEN_DEVICE)GetProcAddress(hAPI,"OpenDevice");
     CloseDevice=(G33DDC_CLOSE_DEVICE)GetProcAddress(hAPI,"CloseDevice");
     SetPower=(G33DDC_SET_POWER)GetProcAddress(hAPI,"SetPower");
@@ -114,8 +116,52 @@ BOOL Initialize(void)
     GetDDC2Frequency=(G33DDC_GET_DDC2_FREQUENCY)GetProcAddress(hAPI,"GetDDC2Frequency");
     GetDemodulatorFrequency=(G33DDC_GET_DEMODULATOR_FREQUENCY)GetProcAddress(hAPI,"GetDemodulatorFrequency");
 
+	//get reveiver list
+	INT32 Count, i;
+	G33DDC_DEVICE_INFO *DeviceList;
+	Count = GetDeviceList(NULL, 0);
+	if (Count >= 0)
+	{
+		if (Count != 0)
+		{
+			//Allocating memory for device information structures
+			DeviceList = (G33DDC_DEVICE_INFO*)malloc(Count * sizeof(G33DDC_DEVICE_INFO));
+			if (DeviceList != NULL)
+			{
+				//Retrieving information about available devices
+				Count = GetDeviceList(DeviceList, Count * sizeof(G33DDC_DEVICE_INFO));
+				if (Count >= 0)
+				{
+					printf("Available G33DDC devices count=%d:\n", Count);
+					for (i = 0; i < Count; i++)
+					{
+						printf("%d. SN: %s\n", i, DeviceList[i].SerialNumber);
+						hDevice = OpenDevice(DeviceList[i].SerialNumber);
+					}
+				}
+				else
+				{
+					printf("GetDeviceList failed with error %08X\n",GetLastError());
+				}
+				free(DeviceList);
+			}
+			else
+			{
+				printf("Out of memory\n");
+			}
+		}
+		else
+		{
+			printf("No available G33DDC device found.\n");
+		}
+	}
+	else
+	{
+		printf("GetDeviceList failed with error %08X\n", GetLastError());
+	}
+
     //open the first available G33DDC device
-    hDevice=OpenDevice(G3XDDC_OPEN_FIRST);
+    /*hDevice=OpenDevice(G3XDDC_OPEN_FIRST);*/
 
     if(hDevice<0)
     {
