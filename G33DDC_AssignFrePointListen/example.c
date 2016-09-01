@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <mmsystem.h>
 #include <math.h>
+#include <time.h>
+#include "wavfile.h"
 
 #define MSG_EXITTHREAD (WM_APP+1000)
 
@@ -12,6 +14,7 @@ G33DDC_SET_POWER SetPower;
 G33DDC_SET_DDC1 SetDDC1;
 G33DDC_GET_DDC1 GetDDC1;
 G33DDC_GET_DDC2 GetDDC2;
+G33DDC_GET_DDC_INFO GetDDCInfo;
 G33DDC_SET_CALLBACKS SetCallbacks;
 G33DDC_SET_FREQUENCY SetFrequency;
 G33DDC_GET_FREQUENCY GetFrequency;
@@ -41,6 +44,10 @@ DWORD ThreadId;
 HWAVEOUT hWaveOut;
 UINT32 BufferCount;
 
+FILE* fpWav = NULL;
+time_t  m_RecordingTime;
+_Bool isBeginRecording = 0;
+DWORDLONG m_dwlRecordingTime = 0;
 
 //procedure of thread used for freeing audio buffers returned to application
 //from audio subsystem
@@ -95,7 +102,8 @@ BOOL Initialize(void)
     SetPower=(G33DDC_SET_POWER)GetProcAddress(hAPI,"SetPower");
     SetDDC1=(G33DDC_SET_DDC1)GetProcAddress(hAPI,"SetDDC1");
     GetDDC1=(G33DDC_GET_DDC1)GetProcAddress(hAPI,"GetDDC1");
-    GetDDC2=(G33DDC_GET_DDC2)GetProcAddress(hAPI,"GetDDC2");    
+    GetDDC2=(G33DDC_GET_DDC2)GetProcAddress(hAPI,"GetDDC2"); 
+	GetDDCInfo = (G33DDC_GET_DDC_INFO)GetProcAddress(hAPI, "GetDDCInfo");
     SetCallbacks=(G33DDC_SET_CALLBACKS)GetProcAddress(hAPI,"SetCallbacks");
     SetFrequency=(G33DDC_SET_FREQUENCY)GetProcAddress(hAPI,"SetFrequency");
     GetFrequency=(G33DDC_GET_FREQUENCY)GetProcAddress(hAPI,"GetFrequency");
@@ -116,6 +124,8 @@ BOOL Initialize(void)
     GetDDC2Frequency=(G33DDC_GET_DDC2_FREQUENCY)GetProcAddress(hAPI,"GetDDC2Frequency");
     GetDemodulatorFrequency=(G33DDC_GET_DEMODULATOR_FREQUENCY)GetProcAddress(hAPI,"GetDemodulatorFrequency");
 
+	isBeginRecording = 0;
+
 	//get reveiver list
 	INT32 Count, i;
 	G33DDC_DEVICE_INFO *DeviceList;
@@ -135,7 +145,7 @@ BOOL Initialize(void)
 					printf("Available G33DDC devices count=%d:\n", Count);
 					for (i = 0; i < Count; i++)
 					{
-						printf("%d. SN: %s\n", i, DeviceList[i].SerialNumber);
+						printf("%d. SN: %s, ChannelCount = %d\n", i, DeviceList[i].SerialNumber, DeviceList[i].ChannelCount);
 						hDevice = OpenDevice(DeviceList[i].SerialNumber);
 					}
 				}
@@ -207,6 +217,47 @@ BOOL Initialize(void)
     return TRUE;
 }
 
+void stopRecording() {
+
+	//stop audio streaming for channel 0
+	StopAudio(hDevice, 0);
+
+	//stop DDC2 streaming for channel 0
+	StopDDC2(hDevice, 0);
+
+	//stop DDC1 streaming
+	StopDDC1(hDevice);
+
+	//in this case it is not necessary to use StopAudio and StopDDC2
+	//because StopDDC1 stop audio and DDC2 streaming too
+
+
+	waveOutReset(hWaveOut);
+
+	//wait for all buffers sent to waveout are returned
+	while (BufferCount)
+	{
+		Sleep(10);
+	}
+
+	PostThreadMessage(ThreadId, MSG_EXITTHREAD, 0, 0);
+	WaitForSingleObject(hThread, INFINITE);
+	CloseHandle(hThread);
+
+	waveOutClose(hWaveOut);
+
+	//unregister all callback functions
+	SetCallbacks(hDevice, NULL, 0);
+
+	SetPower(hDevice, FALSE);
+
+	CloseDevice(hDevice);
+
+	FreeLibrary(hAPI);
+
+	WriteWavEnder(fpWav);
+}
+
 void __stdcall MyDDC2PreprocessedStreamCallback(UINT32 Channel,CONST FLOAT *Buffer,UINT32 NumberOfSamples,FLOAT SlevelPeak,FLOAT SlevelRMS,DWORD_PTR UserData)
 {
  double Slevel_dBm;
@@ -217,7 +268,24 @@ void __stdcall MyDDC2PreprocessedStreamCallback(UINT32 Channel,CONST FLOAT *Buff
     printf("\rSlevel: RMS[V]=%9.7f V, RMS[dBm]=%6.1f dBm, Peak[V]=%9.7f V",SlevelRMS,Slevel_dBm,SlevelPeak);
 }
 
-void __stdcall MyAudioStreamCallback(UINT32 Channel,CONST FLOAT *Buffer,CONST FLOAT *BufferFiltered,UINT32 NumberOfSamples,DWORD_PTR UserData)
+void  __stdcall MyAudioStreamCallback(UINT32 Channel, CONST FLOAT *Buffer, CONST FLOAT *BufferFiltered, UINT32 NumberOfSamples, DWORD_PTR UserData) {
+	printf("   audio channel = %d", Channel);
+	SHORT* OutPut;
+	OutPut = (SHORT*)VirtualAlloc(NULL, NumberOfSamples * sizeof(SHORT), MEM_COMMIT, PAGE_READWRITE);
+	ZeroMemory(OutPut, sizeof(SHORT));
+
+	for (size_t i = 0; i < NumberOfSamples; i++)
+	{
+		OutPut[i] = (SHORT)(Buffer[i] * 32767.0);
+	}
+
+	fwrite(OutPut, sizeof(SHORT), NumberOfSamples, fpWav);
+
+	VirtualFree(OutPut, 0, MEM_RELEASE);
+
+}
+
+void __stdcall MyAudioPlayStreamCallback(UINT32 Channel,CONST FLOAT *Buffer,CONST FLOAT *BufferFiltered,UINT32 NumberOfSamples,DWORD_PTR UserData)
 {
  CONST FLOAT *Input;
  WAVEHDR *WaveHdr;
@@ -256,7 +324,28 @@ void __stdcall MyAudioStreamCallback(UINT32 Channel,CONST FLOAT *Buffer,CONST FL
     }
 }
 
-int main(int argc, char* argv[])
+_Bool isReachTime() {
+	// check if recording limit is reached
+	if (!isBeginRecording)
+	{
+		isBeginRecording = 1;
+		time(&m_RecordingTime);
+	}
+	time_t temp;
+	time(&temp);
+
+	DWORDLONG recordingTime = (DWORDLONG)(temp - m_RecordingTime);
+
+	if (recordingTime > m_dwlRecordingTime)
+	{
+		return 1;
+	}
+
+	return 0;
+}
+
+
+int _main(int argc, char* argv[])
 {
  G3XDDC_DDC_INFO DDCInfo;
  UINT32 DDCTypeIndex;
@@ -265,6 +354,10 @@ int main(int argc, char* argv[])
  UINT32 DDC1Frequency;
  INT32 DDC2Frequency;
  INT32 DemodulatorFrequency;
+
+ m_dwlRecordingTime = 10;
+ fpWav = fopen("D:\\g33.wav", "wb");
+ WriteWavHeader(fpWav,32000);
 
     if(!Initialize())
     {
@@ -285,7 +378,10 @@ int main(int argc, char* argv[])
     GetDDC2(hDevice,&DDCTypeIndex,&DDCInfo);
     printf("DDC type of DDC2: Index=%u, Bandwidth=%u, SampleRate=%u, BitsPerSample=%u\n",DDCTypeIndex,DDCInfo.Bandwidth,DDCInfo.SampleRate,DDCInfo.BitsPerSample);
 
-    //IFCallbacks is not required in this example
+	GetDDCInfo(hDevice, &DDCTypeIndex, &DDCInfo);
+	printf("DDC type of DDC: Index=%u, Bandwidth=%u, SampleRate=%u, BitsPerSample=%u\n", DDCTypeIndex, DDCInfo.Bandwidth, DDCInfo.SampleRate, DDCInfo.BitsPerSample);
+
+	//IFCallbacks is not required in this example
     Callbacks.IFCallback=NULL;
 
     //DDC1StreamCallback is not required in this example
@@ -313,7 +409,7 @@ int main(int argc, char* argv[])
     SetCallbacks(hDevice,&Callbacks,0);
 
     //tune channel 0 to an AM station frequency
-    SetFrequency(hDevice,0,702000);
+    SetFrequency(hDevice,1,1072000);
     //it is possible to tune DDC1, DDC2 and demodulator directly using
     //SetDDC1Frequency, SetDDC2Frequency and SetDemodulatorFrequency
     //SetFrequency(hDevice,0,702000) can be replaced by the following:
@@ -333,6 +429,8 @@ int main(int argc, char* argv[])
 
     //get relative demodulator frequency for channel 0
     GetDemodulatorFrequency(hDevice,0,&DemodulatorFrequency);
+	
+
 
     printf("Listening to (demodulator absolute frequency): %u Hz\n",Frequency);
     printf("DDC1 frequency: %u Hz\n",DDC1Frequency);
@@ -353,9 +451,7 @@ int main(int argc, char* argv[])
     SetDemodulatorFilterBandwidth(hDevice,0,8000);
 
     //start DDC1 streaming which has to be running before StartDDC2 is called
-    StartDDC1(hDevice,1024);
-
-    printf("\nPress ENTER to exit.\n\n");    
+    StartDDC1(hDevice,1024);  
 
     //start DDC2 streaming for channel 0, it has to be running before StartAudio is called
     StartDDC2(hDevice,0,1024);
@@ -364,43 +460,12 @@ int main(int argc, char* argv[])
     //start audio streaming for channel 0, with 1024 samples per buffer
     StartAudio(hDevice,0,1024);
 
-    getchar();
-
-    //stop audio streaming for channel 0
-    StopAudio(hDevice,0);
-
-    //stop DDC2 streaming for channel 0
-    StopDDC2(hDevice,0);
-
-    //stop DDC1 streaming
-    StopDDC1(hDevice);
-
-    //in this case it is not necessary to use StopAudio and StopDDC2
-    //because StopDDC1 stop audio and DDC2 streaming too
-
-
-    waveOutReset(hWaveOut);
-
-    //wait for all buffers sent to waveout are returned
-    while(BufferCount)
-    {
-        Sleep(10);
-    }
-
-    PostThreadMessage(ThreadId,MSG_EXITTHREAD,0,0);
-    WaitForSingleObject(hThread,INFINITE);
-    CloseHandle(hThread);
-
-    waveOutClose(hWaveOut);
-
-    //unregister all callback functions
-    SetCallbacks(hDevice,NULL,0);
-
-    SetPower(hDevice,FALSE);
-
-    CloseDevice(hDevice);
-
-    FreeLibrary(hAPI);
-
+	while (1) {
+		if (isReachTime()){
+			stopRecording();
+			break;
+		}
+		Sleep(1);
+	}
     return 0;
 }

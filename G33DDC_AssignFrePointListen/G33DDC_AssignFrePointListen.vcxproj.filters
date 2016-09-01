@@ -15,12 +15,36 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="example.c">
+    <ClCompile Include="test.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Controller.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="wavfile.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="com_client_DealTask.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="G33DDCAPI.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="wavfile.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Controller.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="com_client_DealTask.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="jni.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="jni_md.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

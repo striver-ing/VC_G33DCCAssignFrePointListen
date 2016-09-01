@@ -8,6 +8,7 @@
 #endif
 
 #include <windows.h>
+#include <functional>
 
 #define G33DDC_CLASS_ID_DEVICE_ENUMERATOR  0x5001
 #define G33DDC_CLASS_ID_DEVICE             0x5102
@@ -441,6 +442,7 @@ typedef BOOL (__stdcall *G33DDC_DDC1_PLAYBACK_STREAM_CALLBACK)(VOID *Buffer,UINT
 typedef VOID (__stdcall *G33DDC_DDC2_STREAM_CALLBACK)(UINT32 Channel,CONST FLOAT *Buffer,UINT32 NumberOfSamples,DWORD_PTR UserData);
 typedef VOID (__stdcall *G33DDC_DDC2_PREPROCESSED_STREAM_CALLBACK)(UINT32 Channel,CONST FLOAT *Buffer,UINT32 NumberOfSamples,FLOAT SlevelPeak,FLOAT SlevelRMS,DWORD_PTR UserData);
 typedef VOID (__stdcall *G33DDC_AUDIO_STREAM_CALLBACK)(UINT32 Channel,CONST FLOAT *Buffer,CONST FLOAT *BufferFiltered,UINT32 NumberOfSamples,DWORD_PTR UserData);
+//typedef std::function<VOID __stdcall(UINT32 Channel, CONST FLOAT *Buffer, CONST FLOAT *BufferFiltered, UINT32 NumberOfSamples, DWORD_PTR UserData)> G33DDC_AUDIO_STREAM_CALLBACK;
 typedef BOOL (__stdcall *G33DDC_AUDIO_PLAYBACK_STREAM_CALLBACK)(UINT32 Channel,FLOAT *Buffer,UINT32 NumberOfSamples,DWORD_PTR UserData);
 
 #pragma pack(push,1)

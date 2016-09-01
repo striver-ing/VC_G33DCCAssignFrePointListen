@@ -25,7 +25,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v140</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
@@ -117,10 +117,18 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="example.c" />
+    <ClCompile Include="com_client_DealTask.cpp" />
+    <ClCompile Include="Controller.cpp" />
+    <ClCompile Include="test.cpp" />
+    <ClCompile Include="wavfile.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="com_client_DealTask.h" />
+    <ClInclude Include="Controller.h" />
     <ClInclude Include="G33DDCAPI.h" />
+    <ClInclude Include="jni.h" />
+    <ClInclude Include="jni_md.h" />
+    <ClInclude Include="wavfile.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
