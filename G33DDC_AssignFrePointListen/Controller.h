@@ -11,11 +11,10 @@
 
 class Controller {
 public:
-	BOOL Initialize(const char* serialNumber, int channel);
+	BOOL Initialize(const char* serialNumber);
 	void stopRecording();
 	bool isReachTime();
 	void doTask(const char* serialNumber, int channel, int frequence, const char* filePath, int fileTotalTime);
-	static void __stdcall MyDDC2PreprocessedStreamCallback(UINT32 Channel, CONST FLOAT *Buffer, UINT32 NumberOfSamples, FLOAT SlevelPeak, FLOAT SlevelRMS, DWORD_PTR UserData);
 	static void __stdcall MyAudioStreamCallback(UINT32 Channel, CONST FLOAT *Buffer, CONST FLOAT *BufferFiltered, UINT32 NumberOfSamples, DWORD_PTR UserData);
 
 private:
@@ -51,21 +50,11 @@ private:
 	INT32 hDevice;
 
 	HMODULE hAPI = NULL;
-	HANDLE hThread;
-	DWORD ThreadId;
-	HWAVEOUT hWaveOut;
-	UINT32 BufferCount;
-
+	
 	FILE* fpWav = NULL;
+	DWORDLONG m_dwlRecordingTime = 0;
 	time_t  m_RecordingTime;
 	bool isBeginRecording = 0;
-	DWORDLONG m_dwlRecordingTime = 0;
 
 	WavFile *wavFile;
-
-	//void setMyself()
-	//{
-	//	MyCtrl = this;
-	//}
-
 };

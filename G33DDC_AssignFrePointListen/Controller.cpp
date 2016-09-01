@@ -2,9 +2,9 @@
 #include<windows.h>
 #include <functional>
 
-static Controller *MyCtrl;
+const bool IS_DEBUG = false;
 
-BOOL Controller::Initialize(const char* serialNumber, int channel)
+BOOL Controller::Initialize(const char* serialNumber)
 {
 	hDevice = -1;
 	WAVEFORMATEX WaveFormat;
@@ -64,11 +64,12 @@ BOOL Controller::Initialize(const char* serialNumber, int channel)
 				Count = GetDeviceList(DeviceList, Count * sizeof(G33DDC_DEVICE_INFO));
 				if (Count >= 0)
 				{
-					printf("Available G33DDC devices count=%d:\n", Count);
+					//printf("Available G33DDC devices count=%d:\n", Count);
 					for (i = 0; i < Count; i++)
 					{
-						printf("%d. SN: %s, ChannelCount = %d\n", i, DeviceList[i].SerialNumber, DeviceList[i].ChannelCount);
+						//printf("%d. SN: %s, ChannelCount = %d\n", i, DeviceList[i].SerialNumber, DeviceList[i].ChannelCount);
 						if (strcmp(DeviceList[i].SerialNumber, serialNumber) == 0) {
+							//printf("接收机 %s 执行任务中...\n",DeviceList[i].SerialNumber);
 							hDevice = OpenDevice(DeviceList[i].SerialNumber);
 						}
 					}
@@ -104,73 +105,14 @@ BOOL Controller::Initialize(const char* serialNumber, int channel)
 		FreeLibrary(hAPI);
 		return FALSE;
 	}
-
-
-	////create thread which frees audio buffers returned to application
-	//hThread = CreateThread(NULL, 0, WaveOutThreadProcedure, NULL, 0, &ThreadId);
-
-	//if (hThread == NULL)
-	//{
-	//	printf("Failed to create thread. Error=%u\n", GetLastError());
-	//	CloseDevice(hDevice);
-	//	FreeLibrary(hAPI);
-	//	return FALSE;
-	//}
-
-	////initialize waveout
-	//WaveFormat.wFormatTag = WAVE_FORMAT_PCM;
-	//WaveFormat.nChannels = 1;
-	//WaveFormat.nSamplesPerSec = 48000;
-	//WaveFormat.wBitsPerSample = 16;
-	//WaveFormat.nBlockAlign = WaveFormat.nChannels*WaveFormat.wBitsPerSample / 8;
-	//WaveFormat.nAvgBytesPerSec = WaveFormat.nBlockAlign*WaveFormat.nSamplesPerSec;
-	//WaveFormat.cbSize = 0;
-
-	////reset buffer count
-	//BufferCount = 0;
-
-	//if (waveOutOpen(&hWaveOut, WAVE_MAPPER, &WaveFormat, ThreadId, NULL, CALLBACK_THREAD) != MMSYSERR_NOERROR)
-	//{
-	//	printf("Failed to open waveout\n");
-	//	PostThreadMessage(ThreadId, MSG_EXITTHREAD, 0, 0);
-	//	WaitForSingleObject(hThread, INFINITE);
-	//	CloseHandle(hThread);
-	//	CloseDevice(hDevice);
-	//	FreeLibrary(hAPI);
-	//	return FALSE;
-	//}
-
 	return TRUE;
 }
 
 void Controller::stopRecording() {
-
-	//stop audio streaming for channel 0
-	StopAudio(hDevice, 0);
-
-	//stop DDC2 streaming for channel 0
-	StopDDC2(hDevice, 0);
-
 	//stop DDC1 streaming
-	StopDDC1(hDevice);
-
 	//in this case it is not necessary to use StopAudio and StopDDC2
 	//because StopDDC1 stop audio and DDC2 streaming too
-
-
-	waveOutReset(hWaveOut);
-
-	////wait for all buffers sent to waveout are returned
-	//while (BufferCount)
-	//{
-	//	Sleep(10);
-	//}
-
-	//PostThreadMessage(ThreadId, MSG_EXITTHREAD, 0, 0);
-	//WaitForSingleObject(hThread, INFINITE);
-	//CloseHandle(hThread);
-
-	//waveOutClose(hWaveOut);
+	StopDDC1(hDevice);
 
 	//unregister all callback functions
 	SetCallbacks(hDevice, NULL, 0);
@@ -184,18 +126,8 @@ void Controller::stopRecording() {
 	wavFile->WriteWavEnder(fpWav);
 }
 
-void __stdcall Controller::MyDDC2PreprocessedStreamCallback(UINT32 Channel, CONST FLOAT *Buffer, UINT32 NumberOfSamples, FLOAT SlevelPeak, FLOAT SlevelRMS, DWORD_PTR UserData)
-{
-	double Slevel_dBm;
-
-	//convert slevel RMS in Volts to dBm
-	Slevel_dBm = 10.0*log10(SlevelRMS*SlevelRMS*(1000.0 / 50.0));
-
-	printf("\rSlevel: RMS[V]=%9.7f V, RMS[dBm]=%6.1f dBm, Peak[V]=%9.7f V", SlevelRMS, Slevel_dBm, SlevelPeak);
-}
-
 void  __stdcall Controller::MyAudioStreamCallback(UINT32 Channel, CONST FLOAT *Buffer, CONST FLOAT *BufferFiltered, UINT32 NumberOfSamples, DWORD_PTR UserData) {
-	printf("   audio channel = %d", Channel);
+	Controller* controller = (Controller*) UserData;
 	SHORT* OutPut;
 	OutPut = (SHORT*)VirtualAlloc(NULL, NumberOfSamples * sizeof(SHORT), MEM_COMMIT, PAGE_READWRITE);
 	ZeroMemory(OutPut, sizeof(SHORT));
@@ -205,14 +137,14 @@ void  __stdcall Controller::MyAudioStreamCallback(UINT32 Channel, CONST FLOAT *B
 		OutPut[i] = (SHORT)(Buffer[i] * 32767.0);
 	}
 
-	fwrite(OutPut, sizeof(SHORT), NumberOfSamples, MyCtrl->fpWav);
+	fwrite(OutPut, sizeof(SHORT), NumberOfSamples, controller->fpWav);
 
 	VirtualFree(OutPut, 0, MEM_RELEASE);
 
 }
 
+// check if recording limit is reached
 bool Controller::isReachTime() {
-	// check if recording limit is reached
 	if (!isBeginRecording)
 	{
 		isBeginRecording = 1;
@@ -232,6 +164,11 @@ bool Controller::isReachTime() {
 }
 
 void Controller::doTask(const char* serialNumber, int channel, int frequence, const char* filePath, int fileTotalTime) {
+	if (!Initialize(serialNumber))
+	{
+		return;
+	}
+
 	G3XDDC_DDC_INFO DDCInfo;
 	UINT32 DDCTypeIndex;
 	G33DDC_CALLBACKS Callbacks;
@@ -240,17 +177,10 @@ void Controller::doTask(const char* serialNumber, int channel, int frequence, co
 	INT32 DDC2Frequency;
 	INT32 DemodulatorFrequency;
 	m_dwlRecordingTime = fileTotalTime;
-
-	MyCtrl = this;
 	
 	wavFile = new WavFile();
 	fpWav = fopen(filePath, "wb");
 	wavFile->WriteWavHeader(fpWav, 48000);
-
-	if (!Initialize(serialNumber, channel))
-	{
-		return;
-	}
 
 	//set power
 	SetPower(hDevice, TRUE);
@@ -258,14 +188,18 @@ void Controller::doTask(const char* serialNumber, int channel, int frequence, co
 	//set DDC type of DDC1 to 1 (DDC Bandwidth=24000, SampleRate=32kHz, BitsPerSample=32)
 	SetDDC1(hDevice, 1);
 
-	//retrieve current DDC type of the DDC1
-	GetDDC1(hDevice, &DDCTypeIndex, &DDCInfo);
-	printf("DDC type of DDC1: Index=%u, Bandwidth=%u, SampleRate=%u, BitsPerSample=%u\n", DDCTypeIndex, DDCInfo.Bandwidth, DDCInfo.SampleRate, DDCInfo.BitsPerSample);
+	if (IS_DEBUG) 
+	{
+		//retrieve current DDC type of the DDC1
+		GetDDC1(hDevice, &DDCTypeIndex, &DDCInfo);
+		printf("DDC type of DDC1: Index=%u, Bandwidth=%u, SampleRate=%u, BitsPerSample=%u\n", DDCTypeIndex, DDCInfo.Bandwidth, DDCInfo.SampleRate, DDCInfo.BitsPerSample);
 
-	//retrieve current DDC type of the DDC2
-	GetDDC2(hDevice, &DDCTypeIndex, &DDCInfo);
-	printf("DDC type of DDC2: Index=%u, Bandwidth=%u, SampleRate=%u, BitsPerSample=%u\n", DDCTypeIndex, DDCInfo.Bandwidth, DDCInfo.SampleRate, DDCInfo.BitsPerSample);
+		//retrieve current DDC type of the DDC2
+		GetDDC2(hDevice, &DDCTypeIndex, &DDCInfo);
+		printf("DDC type of DDC2: Index=%u, Bandwidth=%u, SampleRate=%u, BitsPerSample=%u\n", DDCTypeIndex, DDCInfo.Bandwidth, DDCInfo.SampleRate, DDCInfo.BitsPerSample);
 
+	}
+	
 	//IFCallbacks is not required in this example
 	Callbacks.IFCallback = NULL;
 
@@ -282,7 +216,7 @@ void Controller::doTask(const char* serialNumber, int channel, int frequence, co
 	Callbacks.DDC2StreamCallback = NULL;
 
 	//DDC2PreprocessedStreamCallback is used to display signal level in this example
-	Callbacks.DDC2PreprocessedStreamCallback = &Controller::MyDDC2PreprocessedStreamCallback;
+	Callbacks.DDC2PreprocessedStreamCallback = NULL;
 
 	//AudioStreamCallback is used to play audio on wave out device
 	Callbacks.AudioStreamCallback = &Controller::MyAudioStreamCallback;
@@ -307,7 +241,7 @@ void Controller::doTask(const char* serialNumber, int channel, int frequence, co
 	Callbacks.AudioPlaybackStreamCallback = NULL;
 
 	//register callback functiobs
-	SetCallbacks(hDevice, &Callbacks, 0);
+	SetCallbacks(hDevice, &Callbacks, DWORD_PTR(this));
 
 	//tune channel 0 to an AM station frequency
 	SetFrequency(hDevice, channel, frequence);
@@ -319,24 +253,27 @@ void Controller::doTask(const char* serialNumber, int channel, int frequence, co
 	//SetDemodulatorFrequency(hDevice,0,2000);
 	//final absolute frequency of the demodulator is 700000+0+2000=702000
 
-	//get absolute frequency where the demodulator of channel 0 is tuned
-	GetFrequency(hDevice, channel, &Frequency);
+	if (IS_DEBUG)
+	{
+		//get absolute frequency where the demodulator of channel 0 is tuned
+		GetFrequency(hDevice, channel, &Frequency);
 
-	//get DDC1 frequency
-	GetDDC1Frequency(hDevice, &DDC1Frequency);
+		//get DDC1 frequency
+		GetDDC1Frequency(hDevice, &DDC1Frequency);
 
-	//get relative DDC2 frequency for channel 0
-	GetDDC2Frequency(hDevice, channel, &DDC2Frequency);
+		//get relative DDC2 frequency for channel 0
+		GetDDC2Frequency(hDevice, channel, &DDC2Frequency);
 
-	//get relative demodulator frequency for channel 0
-	GetDemodulatorFrequency(hDevice, channel, &DemodulatorFrequency);
+		//get relative demodulator frequency for channel 0
+		GetDemodulatorFrequency(hDevice, channel, &DemodulatorFrequency);
 
 
 
-	printf("Listening to (demodulator absolute frequency): %u Hz\n", Frequency);
-	printf("DDC1 frequency: %u Hz\n", DDC1Frequency);
-	printf("DDC2 frequency (relative): %d Hz\n", DDC2Frequency);
-	printf("Demodulator frequency (relative): %d Hz\n", DemodulatorFrequency);
+		printf("Listening to (demodulator absolute frequency): %u Hz\n", Frequency);
+		printf("DDC1 frequency: %u Hz\n", DDC1Frequency);
+		printf("DDC2 frequency (relative): %d Hz\n", DDC2Frequency);
+		printf("Demodulator frequency (relative): %d Hz\n", DemodulatorFrequency);
+	}
 
 
 	//set AGC params for channel 0, attack=0.02s, decay=0.5s, ref. level=-15dB
